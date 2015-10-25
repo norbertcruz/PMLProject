@@ -1,0 +1,168 @@
+---
+title: "Practical Machine Learning Project"
+author: "Norbert Cruz"
+date: "October 25, 2015"
+output: html_document
+---
+
+# Evaluating "Proper" Exercise Form with Machine Learning
+
+## Summary  
+  
+"Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks.[...] They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. "  
+  
+The goal of the analysis is to predict in which of the 5 ways did they do the exercise. In other words, the code will make predictions about the "classe" variable in the data.  All other variables can be used as predictors. The report includes how the model is built, if cross validation is used, the expected out of sample error, and why each choice about the analysis is made. The selected model will then be used to predict 20 test cases.  
+  
+
+## Loading Libraries and Data
+  
+```{r cache = TRUE, warning = FALSE, message = FALSE}
+library(caret)  # for data partitions and ml models
+
+library(gbm)  # generalized boosting method
+
+library(randomForest)  # random forest method
+```  
+  
+Data is read directly from the source into memory  
+  
+```{r cache = TRUE}
+trainUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv(url(trainUrl), na.strings = c("NA", "", "#DIV/0!"))
+
+testing <- read.csv(url(testUrl), na.strings = c("NA", "", "#DIV/0!"))
+```  
+  
+Here we take a look into the dimensions of both the training and testing sets, 
+and a summary of the training set classe variable (testing set must not be explored).  
+  
+```{r cache = TRUE}
+rbind(dim(training), dim(testing))
+
+summary(training$classe)
+```  
+  
+This information shows a total of 19622 observations for 160 variables in the training set, while the classe variable contains 5 levels (A - E).  Testing set contains 20 test cases.
+
+  
+## Data Partitioning  
+  
+The training set must be split into train and test sets. The train set will be used for model building and selection, while the test set will be used for model validation and assesing out of sample error.  Seed is set for reproducibility.
+  
+```{r cache = TRUE}
+set.seed(24)
+
+inTrain <- createDataPartition(y = training$classe, p = 2/3, list = FALSE)
+
+train <- training[inTrain, ]
+
+test <- training[-inTrain, ]
+```  
+  
+  
+## Preprocessing  
+  
+The data contains a high number of variables that can be used as predictors. Reducing this number is beneficial as long as the variables that are left out do not contribute significantly to the prediction model. For example, variables that contain near zero variablity, or a high number of missing values can be left out from the analysis. Variables that do not provide information about excercise movement can be left out aswell.  
+  
+Near Zero Vars -> finds variables that have near zero variability and removes them from train set.
+  
+```{r cache = TRUE}
+nearZero <- nearZeroVar(train, saveMetrics = TRUE)
+
+train <- train[, nearZero$nzv == FALSE]
+```  
+  
+Here we observe that the first 6 variables can be excluded, given they do not contain information on excercise movement.
+  
+```{r cache = TRUE}
+head(summary(train[, 1:10]))
+
+train <- train[, -(1:6)]
+```  
+  
+Removing variables with high NA count.  
+  
+```{r cache = TRUE}
+countNA <- sapply(training, function(x) {sum(is.na(x))})
+
+table(countNA)
+```  
+  
+All variables that contain missing values have a high count. We can remove them as follows:  
+  
+```{r cache = TRUE}
+naColumns <- names(countNA[countNA != 0])
+
+train <- train[, !names(train) %in% naColumns]
+```  
+  
+Same transformations have to be applied to the test and testing sets.  Use preprocessed train column names.  
+  
+```{r cache = TRUE}
+preProc1 <- colnames(train)
+
+preProc2 <- colnames(train[, -53]) # remove classe var
+
+test <- test[preProc1]
+
+testing <- testing[preProc2]  # we only need predictors to get the answers
+```  
+  
+  
+## Prediction Models  
+  
+This report will test the two best models for multivariate data, generalized boosting and random forests.  
+  
+Generalized Boosted Regression:  (With cross validation)
+  
+```{r cache = TRUE, message = FALSE}
+control <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+    
+gbmFit <- train(classe ~ ., data = train, method = "gbm", trControl = control,
+                    verbose = FALSE)
+```  
+  
+Random Forests:  
+  
+```{r cache = TRUE}
+rfFit <- randomForest(classe ~ ., data = train)
+```
+  
+  
+## Comparing Models  
+  
+The model with highest accuracy will be selected for predictions.
+  
+```{r cache = TRUE}
+gbmPrediction <- predict(gbmFit, newdata = test)
+
+gbmCM <- confusionMatrix(gbmPrediction, test$classe)
+
+
+rfPrediction <- predict(rfFit, newdata = test, type = "class")
+
+rfCM <- confusionMatrix(rfPrediction, test$classe)
+``` 
+  
+```{r cache = TRUE}
+cbind(gbm = gbmCM$overall[1], rf = rfCM$overall[1])
+
+outOfSampleErr <- 1 - rfCM$overall[1]
+```  
+  
+Random Forests proves to be the better predictive model.  The expected out of sample error for the rf model would be `r outOfSampleErr*100`%.  
+  
+  
+## Prediction  
+  
+The Random Forest Fit will be used to predict the outcome of the 20 test cases:  
+  
+```{r cache = TRUE}
+predict(rfFit, newdata = testing, type = "class")
+```  
+  
+
+  
